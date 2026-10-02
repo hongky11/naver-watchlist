@@ -85,7 +85,7 @@
   <input id="ghToken" type="password" placeholder="ghp_...">
   <label>저장소 (owner/repo)</label>
   <input id="ghRepo" placeholder="hongky11/naver-watchlist" value="hongky11/naver-watchlist">
-  <button class="btn-save" onclick="saveToGitHub()">GitHub에 저장</button>
+  <button class="btn-save" id="btnSave">GitHub에 저장</button>
 
   <div style="margin-top:16px;">
     <strong>폰 설정용 주소:</strong>
@@ -221,71 +221,95 @@ function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-async function saveFile(repo, token, path, content, sha) {
-  const body = { message: `대시보드 업데이트: ${path}`, content: btoa(unescape(encodeURIComponent(content))) };
-  if (sha) body.sha = sha;
-
-  const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `token ${token}`,
-      'Accept': 'application/vnd.github.v3+json',
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
-  return res.ok;
-}
-
-async function getSha(repo, token, path) {
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-      headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return data.sha;
-    }
-  } catch (e) {}
-  return null;
-}
-
 async function saveToGitHub() {
+  const btn = document.getElementById('btnSave');
+  const statusEl = document.getElementById('status');
+  
+  // 즉시 시각적 피드백
+  btn.textContent = '저장 중... (1/4)';
+  statusEl.textContent = '시작...';
+  statusEl.className = 'status ok';
+
   const token = document.getElementById('ghToken').value.trim();
   const repo = document.getElementById('ghRepo').value.trim();
 
-  if (!token || !repo) { showStatus('토큰과 저장소를 입력하세요', false); return; }
-
-  showStatus('저장 중...', true);
+  if (!token) {
+    statusEl.textContent = 'GitHub 토큰을 입력하세요';
+    statusEl.className = 'status err';
+    btn.textContent = 'GitHub에 저장';
+    return;
+  }
+  if (!repo) {
+    statusEl.textContent = '저장소를 입력하세요 (예: hongky11/naver-watchlist)';
+    statusEl.className = 'status err';
+    btn.textContent = 'GitHub에 저장';
+    return;
+  }
 
   try { localStorage.setItem('ghToken', token); } catch (e) {}
   try { localStorage.setItem('ghRepo', repo); } catch (e) {}
 
-  // 설정 읽기
   config.cycleWaitSec = parseInt(document.getElementById('cfgCycle').value) || 30;
   config.itemDelayMs = parseInt(document.getElementById('cfgDelay').value) || 1000;
 
-  try {
-    const enabled = items.filter(x => x.enabled);
+  const headers = {
+    'Authorization': 'Bearer ' + token,
+    'Accept': 'application/vnd.github.v3+json',
+    'Content-Type': 'application/json'
+  };
 
-    // watchlist.json 저장
-    const watchSha = await getSha(repo, token, 'watchlist.json');
-    const watchOk = await saveFile(repo, token, 'watchlist.json',
-      JSON.stringify(enabled, null, 2), watchSha);
-
-    // config.json 저장
-    const cfgSha = await getSha(repo, token, 'config.json');
-    const cfgOk = await saveFile(repo, token, 'config.json',
-      JSON.stringify(config, null, 2), cfgSha);
-
-    if (watchOk && cfgOk) {
-      showStatus(`저장됨 (상품 ${enabled.length}개, 감시 ${config.pollerEnabled ? '켬' : '끔'}). 폰은 1분 안에 자동 반영.`, true);
-    } else {
-      showStatus('저장 실패', false);
-    }
-  } catch (e) {
-    showStatus('저장 실패: ' + e.message, false);
+  async function getSha(path) {
+    btn.textContent = '저장 중... (2/4) ' + path + ' 확인';
+    statusEl.textContent = path + ' 기존 파일 확인 중...';
+    const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { headers });
+    if (res.status === 401) throw new Error('토큰이 유효하지 않습니다 (401)');
+    if (res.status === 403) throw new Error('토큰 권한 부족 또는 API 한도 초과 (403). repo 권한을 확인하세요.');
+    if (res.status === 404) throw new Error('저장소 또는 파일을 찾을 수 없습니다 (404). 저장소 이름을 확인하세요.');
+    if (!res.ok) throw new Error('파일 확인 실패: HTTP ' + res.status);
+    const data = await res.json();
+    return data.sha;
   }
+
+  async function putFile(path, content, sha) {
+    btn.textContent = '저장 중... (3/4) ' + path + ' 업로드';
+    statusEl.textContent = path + ' 업로드 중...';
+    const body = {
+      message: '대시보드 업데이트: ' + path,
+      content: btoa(unescape(encodeURIComponent(content))),
+      sha: sha
+    };
+    const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+      method: 'PUT',
+      headers: headers,
+      body: JSON.stringify(body)
+    });
+    if (res.status === 401) throw new Error('토큰이 유효하지 않습니다 (401)');
+    if (res.status === 403) throw new Error('토큰 권한 부족 (403). repo 권한을 확인하세요.');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error('업로드 실패: HTTP ' + res.status + ' ' + (errData.message || ''));
+    }
+    return true;
+  }
+
+  try {
+    btn.textContent = '저장 중... (2/4)';
+    const watchSha = await getSha('watchlist.json');
+    await putFile('watchlist.json', JSON.stringify(items, null, 2), watchSha);
+
+    btn.textContent = '저장 중... (3/4)';
+    const cfgSha = await getSha('config.json');
+    await putFile('config.json', JSON.stringify(config, null, 2), cfgSha);
+
+    btn.textContent = '저장 중... (4/4)';
+    statusEl.textContent = `저장 완료! 상품 ${items.length}개. 폰은 1분 안에 반영됩니다.`;
+    statusEl.className = 'status ok';
+  } catch (e) {
+    statusEl.textContent = '저장 실패: ' + e.message;
+    statusEl.className = 'status err';
+  }
+
+  btn.textContent = 'GitHub에 저장';
 }
 
 async function loadInitial() {
@@ -311,6 +335,7 @@ async function loadInitial() {
 }
 
 loadInitial();
+document.getElementById('btnSave').addEventListener('click', saveToGitHub);
 </script>
 </body>
 </html>
