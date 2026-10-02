@@ -386,7 +386,17 @@
     "storeSlug": "xoxo_xoplay",
     "type": "smartstore",
     "url": "https://smartstore.naver.com/xoxo_xoplay/products/13441002466",
-    "limit24h": true,
+    "limit24h": false,
     "enabled": true
+  },
+  {
+    "storeSlug": "bandai",
+    "productId": "13779390431",
+    "type": "brand",
+    "url": "https://m.brand.naver.com/bandai/products/13779390431",
+    "keyword": "케로로 캐스트",
+    "maxPrice": 70000,
+    "enabled": true,
+    "limit24h": true
   }
 ]
