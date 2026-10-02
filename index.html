@@ -256,14 +256,14 @@ async function saveToGitHub() {
 
   if (!token || !repo) { showStatus('토큰과 저장소를 입력하세요', false); return; }
 
-  localStorage.setItem('ghToken', token);
-  localStorage.setItem('ghRepo', repo);
+  showStatus('저장 중...', true);
+
+  try { localStorage.setItem('ghToken', token); } catch (e) {}
+  try { localStorage.setItem('ghRepo', repo); } catch (e) {}
 
   // 설정 읽기
   config.cycleWaitSec = parseInt(document.getElementById('cfgCycle').value) || 30;
   config.itemDelayMs = parseInt(document.getElementById('cfgDelay').value) || 1000;
-
-  showStatus('저장 중...', true);
 
   try {
     const enabled = items.filter(x => x.enabled);
