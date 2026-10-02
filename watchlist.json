@@ -386,7 +386,7 @@
     "storeSlug": "xoxo_xoplay",
     "type": "smartstore",
     "url": "https://smartstore.naver.com/xoxo_xoplay/products/13441002466",
-    "limit24h": false,
+    "limit24h": true,
     "enabled": true
   }
 ]
