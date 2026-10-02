@@ -85,7 +85,8 @@
   <input id="ghToken" type="password" placeholder="ghp_...">
   <label>저장소 (owner/repo)</label>
   <input id="ghRepo" placeholder="hongky11/naver-watchlist" value="hongky11/naver-watchlist">
-  <button class="btn-save" id="btnSave">GitHub에 저장</button>
+  <button class="btn-save" id="btnSave" onclick="saveToGitHub()" style="display:none;">GitHub에 저장</button>
+  <p style="font-size:11px; color:#999; margin-top:8px;">변경하면 자동으로 GitHub에 저장됩니다.</p>
 
   <div style="margin-top:16px;">
     <strong>폰 설정용 주소:</strong>
@@ -95,6 +96,15 @@
 </div>
 
 <script>
+// 오류를 화면에 표시 (디버깅용)
+window.onerror = function(msg, src, line) {
+  const el = document.getElementById('status');
+  if (el) {
+    el.textContent = 'JS 오류: ' + msg + ' (줄 ' + line + ')';
+    el.className = 'status err';
+  }
+};
+
 let items = [];
 let config = { cycleWaitSec: 30, itemDelayMs: 1000, pollerEnabled: true, purchaseLimit24h: true };
 let ghToken = localStorage.getItem('ghToken') || '';
@@ -115,6 +125,8 @@ function updatePhoneUrl() {
 }
 
 document.getElementById('ghRepo').addEventListener('input', updatePhoneUrl);
+document.getElementById('cfgCycle').addEventListener('change', autoSave);
+document.getElementById('cfgDelay').addEventListener('change', autoSave);
 
 function showStatus(msg, ok) {
   const el = document.getElementById('status');
@@ -154,28 +166,42 @@ function addItem() {
   document.getElementById('newUrl').value = '';
   document.getElementById('newKeyword').value = '';
   render();
-  showStatus('추가됨. GitHub에 저장 버튼을 눌러 저장하세요.', true);
+  showStatus('추가됨. 자동 저장 중...', true);
+  autoSave();
 }
 
 function toggleItem(i) {
   items[i].enabled = !items[i].enabled;
   render();
+  autoSave();
 }
 
 function toggleLimit(i) {
   items[i].limit24h = !(items[i].limit24h !== false);
   render();
+  autoSave();
 }
 
 function deleteItem(i) {
   if (!confirm('삭제할까요?')) return;
   items.splice(i, 1);
   render();
+  autoSave();
 }
 
 function toggleMaster() {
   config.pollerEnabled = !config.pollerEnabled;
   renderMaster();
+  autoSave();
+}
+
+// 변경 시 자동 저장 (토큰이 있을 때만)
+let saveTimer = null;
+function autoSave() {
+  const token = document.getElementById('ghToken').value.trim();
+  if (!token) return; // 토큰 없으면 저장 안 함
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => saveToGitHub(), 1000); // 1초 후 저장 (연속 변경 방지)
 }
 
 function renderMaster() {
