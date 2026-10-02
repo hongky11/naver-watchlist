@@ -15,12 +15,12 @@
   .item-name { font-weight: 500; font-size: 14px; margin-bottom: 4px; }
   .item-meta { font-size: 12px; color: #666; }
   .item-url { font-size: 11px; color: #999; word-break: break-all; }
-  .toggle { width: 48px; height: 28px; border-radius: 14px; border: none; cursor: pointer; font-size: 12px; }
+  .toggle { min-width: 48px; height: 28px; border-radius: 14px; border: none; cursor: pointer; font-size: 12px; padding: 0 8px; }
   .toggle.on { background: #4CAF50; color: white; }
   .toggle.off { background: #ccc; color: #666; }
   .btn-del { background: #f44336; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px; }
   .add-form { display: flex; flex-direction: column; gap: 8px; }
-  .add-form input { padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+  .add-form input, .config-form input { padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
   .btn-add { background: #2196F3; color: white; border: none; border-radius: 4px; padding: 12px; cursor: pointer; font-size: 14px; font-weight: 500; }
   .btn-save { background: #4CAF50; color: white; border: none; border-radius: 4px; padding: 12px; cursor: pointer; font-size: 14px; font-weight: 500; width: 100%; margin-top: 12px; }
   .settings { font-size: 12px; color: #666; }
@@ -29,6 +29,11 @@
   .status.ok { background: #e8f5e9; color: #2e7d32; display: block; }
   .status.err { background: #ffebee; color: #c62828; display: block; }
   .phone-url { background: #e3f2fd; padding: 12px; border-radius: 4px; font-size: 12px; word-break: break-all; margin-top: 8px; }
+  .config-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .config-row > div { flex: 1; }
+  .config-row label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+  .master-toggle { display: flex; align-items: center; justify-content: space-between; padding: 12px; background: #f9f9f9; border-radius: 8px; margin-bottom: 12px; }
+  .master-toggle span { font-size: 14px; font-weight: 500; }
 </style>
 </head>
 <body>
@@ -36,11 +41,6 @@
 <h1>네이버 감시 목록</h1>
 
 <div id="status" class="status"></div>
-
-<div class="card">
-  <h3 style="margin-bottom:12px; font-size:15px;">감시 상품 (<span id="count">0</span>개)</h3>
-  <div id="list"></div>
-</div>
 
 <div class="card">
   <h3 style="margin-bottom:12px; font-size:15px;">상품 추가</h3>
@@ -52,6 +52,33 @@
   </div>
 </div>
 
+<div class="card">
+  <div class="master-toggle">
+    <span>전체 감시</span>
+    <button id="masterToggle" class="toggle on" onclick="toggleMaster()">켬</button>
+  </div>
+
+  <h3 style="margin-bottom:8px; font-size:14px;">감시 주기 설정</h3>
+  <div class="config-form">
+    <div class="config-row">
+      <div>
+        <label>바퀴 사이 대기 (초)</label>
+        <input id="cfgCycle" type="number" value="30" min="5">
+      </div>
+      <div>
+        <label>상품 간 대기 (ms)</label>
+        <input id="cfgDelay" type="number" value="1000" min="500" step="100">
+      </div>
+    </div>
+  </div>
+  <p style="font-size:11px; color:#999; margin-top:8px;">폰이 1분마다 설정을 자동으로 가져갑니다. 저장 버튼을 누르면 반영됩니다.</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-bottom:12px; font-size:15px;">감시 상품 (<span id="count">0</span>개)</h3>
+  <div id="list"></div>
+</div>
+
 <div class="card settings">
   <h3 style="margin-bottom:12px; font-size:15px;">설정</h3>
   <label>GitHub 토큰 (저장용, repo 권한 필요)</label>
@@ -61,13 +88,15 @@
   <button class="btn-save" onclick="saveToGitHub()">GitHub에 저장</button>
 
   <div style="margin-top:16px;">
-    <strong>폰 설정용 JSON 주소:</strong>
+    <strong>폰 설정용 주소:</strong>
     <div class="phone-url" id="phoneUrl">저장소를 입력하면 표시됩니다</div>
+    <div class="phone-url" id="phoneConfigUrl" style="margin-top:4px;"></div>
   </div>
 </div>
 
 <script>
 let items = [];
+let config = { cycleWaitSec: 30, itemDelayMs: 1000, pollerEnabled: true, purchaseLimit24h: true };
 let ghToken = localStorage.getItem('ghToken') || '';
 let ghRepo = localStorage.getItem('ghRepo') || 'hongky11/naver-watchlist';
 
@@ -79,7 +108,9 @@ function updatePhoneUrl() {
   const repo = document.getElementById('ghRepo').value.trim();
   if (repo) {
     document.getElementById('phoneUrl').textContent =
-      `https://raw.githubusercontent.com/${repo}/main/watchlist.json`;
+      '상품: https://raw.githubusercontent.com/' + repo + '/main/watchlist.json';
+    document.getElementById('phoneConfigUrl').textContent =
+      '설정: https://raw.githubusercontent.com/' + repo + '/main/config.json';
   }
 }
 
@@ -93,15 +124,10 @@ function showStatus(msg, ok) {
 }
 
 function parseUrl(url) {
-  // smartstore.naver.com/{store}/products/{id}
-  // brand.naver.com/{brand}/products/{id}
   let m = url.match(/smartstore\.naver\.com\/([^\/]+)\/products\/(\d+)/);
   if (m) return { storeSlug: m[1], productId: m[2], type: 'smartstore' };
   m = url.match(/brand\.naver\.com\/([^\/]+)\/products\/(\d+)/);
   if (m) return { storeSlug: m[1], productId: m[2], type: 'brand' };
-  // m.smartstore / m.brand mobile URLs
-  m = url.match(/m\.smartstore\.naver\.com\/[^\/]*\/products\/(\d+)/);
-  if (m) return { storeSlug: '', productId: m[1], type: 'smartstore' };
   return null;
 }
 
@@ -110,22 +136,9 @@ function addItem() {
   const keyword = document.getElementById('newKeyword').value.trim();
   const maxPrice = parseInt(document.getElementById('newMaxPrice').value) || 70000;
 
-  if (!url || !keyword) {
-    showStatus('URL과 키워드를 입력하세요', false);
-    return;
-  }
-
+  if (!url || !keyword) { showStatus('URL과 키워드를 입력하세요', false); return; }
   const parsed = parseUrl(url);
-  if (!parsed) {
-    showStatus('네이버 상품 URL이 아닙니다', false);
-    return;
-  }
-
-  // storeSlug가 비어있으면 URL에서 추출 시도
-  if (!parsed.storeSlug) {
-    const m = url.match(/naver\.com\/([^\/]+)\/products/);
-    if (m) parsed.storeSlug = m[1];
-  }
+  if (!parsed) { showStatus('네이버 상품 URL이 아닙니다', false); return; }
 
   items.push({
     storeSlug: parsed.storeSlug,
@@ -134,7 +147,8 @@ function addItem() {
     url: url,
     keyword: keyword,
     maxPrice: maxPrice,
-    enabled: true
+    enabled: true,
+    limit24h: true
   });
 
   document.getElementById('newUrl').value = '';
@@ -148,15 +162,34 @@ function toggleItem(i) {
   render();
 }
 
+function toggleLimit(i) {
+  items[i].limit24h = !(items[i].limit24h !== false);
+  render();
+}
+
 function deleteItem(i) {
   if (!confirm('삭제할까요?')) return;
   items.splice(i, 1);
   render();
 }
 
+function toggleMaster() {
+  config.pollerEnabled = !config.pollerEnabled;
+  renderMaster();
+}
+
+function renderMaster() {
+  const btn = document.getElementById('masterToggle');
+  btn.textContent = config.pollerEnabled ? '켬' : '끔';
+  btn.className = 'toggle ' + (config.pollerEnabled ? 'on' : 'off');
+  document.getElementById('cfgCycle').value = config.cycleWaitSec;
+  document.getElementById('cfgDelay').value = config.itemDelayMs;
+}
+
 function render() {
   const list = document.getElementById('list');
-  document.getElementById('count').textContent = items.filter(x => x.enabled).length + '/' + items.length;
+  const enabledCount = items.filter(x => x.enabled).length;
+  document.getElementById('count').textContent = enabledCount + '/' + items.length;
 
   if (items.length === 0) {
     list.innerHTML = '<p style="color:#999; font-size:13px;">상품이 없습니다. 아래에서 추가하세요.</p>';
@@ -172,6 +205,12 @@ function render() {
         <div class="item-name">${escapeHtml(it.keyword)}</div>
         <div class="item-meta">${it.type === 'smartstore' ? '스마트스토어' : '브랜드스토어'} · ${escapeHtml(it.storeSlug)} · ${Number(it.maxPrice).toLocaleString()}원</div>
         <div class="item-url">${escapeHtml(it.url)}</div>
+        <div style="margin-top:4px;">
+          <button class="toggle ${(it.limit24h !== false) ? 'on' : 'off'}" style="font-size:11px; height:24px;"
+                  onclick="toggleLimit(${i})" title="24시간 구매제한">
+            ${(it.limit24h !== false) ? '24시간제한 켬' : '무한구매'}
+          </button>
+        </div>
       </div>
       <button class="btn-del" onclick="deleteItem(${i})">삭제</button>
     </div>
@@ -182,79 +221,93 @@ function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+async function saveFile(repo, token, path, content, sha) {
+  const body = { message: `대시보드 업데이트: ${path}`, content: btoa(unescape(encodeURIComponent(content))) };
+  if (sha) body.sha = sha;
+
+  const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `token ${token}`,
+      'Accept': 'application/vnd.github.v3+json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+  return res.ok;
+}
+
+async function getSha(repo, token, path) {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+      headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.sha;
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function saveToGitHub() {
   const token = document.getElementById('ghToken').value.trim();
   const repo = document.getElementById('ghRepo').value.trim();
 
-  if (!token || !repo) {
-    showStatus('토큰과 저장소를 입력하세요', false);
-    return;
-  }
+  if (!token || !repo) { showStatus('토큰과 저장소를 입력하세요', false); return; }
 
   localStorage.setItem('ghToken', token);
   localStorage.setItem('ghRepo', repo);
 
+  // 설정 읽기
+  config.cycleWaitSec = parseInt(document.getElementById('cfgCycle').value) || 30;
+  config.itemDelayMs = parseInt(document.getElementById('cfgDelay').value) || 1000;
+
   showStatus('저장 중...', true);
 
   try {
-    // 현재 파일의 sha 가져오기
-    const getRes = await fetch(`https://api.github.com/repos/${repo}/contents/watchlist.json`, {
-      headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }
-    });
-
-    let sha = null;
-    if (getRes.ok) {
-      const data = await getRes.json();
-      sha = data.sha;
-    }
-
-    // 저장 (감시 켜진 것만 폰에 전달)
     const enabled = items.filter(x => x.enabled);
-    const content = btoa(unescape(encodeURIComponent(JSON.stringify(enabled, null, 2))));
 
-    const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/watchlist.json`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `token ${token}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        message: `감시 목록 업데이트 (${enabled.length}개)`,
-        content: content,
-        sha: sha
-      })
-    });
+    // watchlist.json 저장
+    const watchSha = await getSha(repo, token, 'watchlist.json');
+    const watchOk = await saveFile(repo, token, 'watchlist.json',
+      JSON.stringify(enabled, null, 2), watchSha);
 
-    if (putRes.ok) {
-      showStatus(`저장됨 (${enabled.length}개). 폰은 1분 안에 자동 반영.`, true);
+    // config.json 저장
+    const cfgSha = await getSha(repo, token, 'config.json');
+    const cfgOk = await saveFile(repo, token, 'config.json',
+      JSON.stringify(config, null, 2), cfgSha);
+
+    if (watchOk && cfgOk) {
+      showStatus(`저장됨 (상품 ${enabled.length}개, 감시 ${config.pollerEnabled ? '켬' : '끔'}). 폰은 1분 안에 자동 반영.`, true);
     } else {
-      const err = await putRes.json();
-      showStatus('저장 실패: ' + (err.message || '알 수 없음'), false);
+      showStatus('저장 실패', false);
     }
   } catch (e) {
     showStatus('저장 실패: ' + e.message, false);
   }
 }
 
-// 초기 로드: URL 파라미터나 기본값에서 가져오기
 async function loadInitial() {
   const repo = ghRepo;
-  if (!repo) { render(); return; }
+  if (!repo) { render(); renderMaster(); return; }
 
   try {
-    const res = await fetch(`https://raw.githubusercontent.com/${repo}/main/watchlist.json`);
-    if (res.ok) {
-      const data = await res.json();
-      // enabled 필드가 없으면 true로
+    // 상품 목록
+    const res1 = await fetch(`https://raw.githubusercontent.com/${repo}/main/watchlist.json`);
+    if (res1.ok) {
+      const data = await res1.json();
       items = data.map(x => ({ ...x, enabled: x.enabled !== false }));
-      render();
-    } else {
-      render();
     }
-  } catch (e) {
-    render();
-  }
+    // 설정
+    const res2 = await fetch(`https://raw.githubusercontent.com/${repo}/main/config.json`);
+    if (res2.ok) {
+      config = await res2.json();
+    }
+  } catch (e) {}
+
+  render();
+  renderMaster();
 }
 
 loadInitial();
